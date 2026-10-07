@@ -1,0 +1,11 @@
+{
+  "name": "custom-add-to-calendar-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted Add to Calendar bridge page and AddEvent-style dropdown for GoHighLevel funnels, driven by custom values.",
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "engines": { "node": ">=20" }
+}

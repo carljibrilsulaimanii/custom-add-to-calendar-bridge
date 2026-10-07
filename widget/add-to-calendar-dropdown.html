@@ -1,0 +1,260 @@
+<!--
+  add-to-calendar-dropdown.html
+  ---------------------------------------------------------------------------
+  Author:  Jibril Sulaiman
+  Date:    2026-04-28 (v2.5.0; published 2026-10-06)
+  Deploy:  Every GoHighLevel funnel page with an "Add to Calendar" button:
+           Page builder > Settings > Tracking Code > Footer Tracking. Paste the whole file.
+  What:    Attaches an AddEvent-style dropdown (Apple, Google, Outlook, Outlook.com,
+           Yahoo) to EVERY GHL button with the custom class "addtocalendar". Each
+           option links to the bridge page (bridge/add-to-calendar-bridge.html).
+           Opens the first dropdown automatically when the URL ends in #addtocalendar.
+  Why:     Looks and behaves like the AddEvent button it replaces, while the event
+           itself comes from the bridge. Replace the five
+           https://events.example.com/add-to-calendar links with your bridge page.
+           Only the bridge URL, identifiers and these comments differ from the
+           running copy.
+  ---------------------------------------------------------------------------
+-->
+
+<style>
+  .atc-dropdown {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 250px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.15), 0 1px 4px rgba(0,0,0,.08);
+    z-index: 9999;
+    padding: 8px 0;
+    animation: atcDropFadeIn 0.15s ease;
+    font-family: "Montserrat", sans-serif;
+  }
+  .atc-dropdown.atc-dropdown--open {
+    display: block;
+  }
+  .atc-dropdown.atc-dropdown--below {
+    bottom: auto;
+    top: calc(100% + 10px);
+  }
+  @keyframes atcDropFadeIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  .atc-dropdown a.atc-item {
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+    padding: 10px 18px !important;
+    font-size: 15px !important;
+    font-weight: 400 !important;
+    color: #333 !important;
+    text-decoration: none !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    transition: background 0.15s !important;
+    white-space: nowrap !important;
+  }
+  .atc-dropdown a.atc-item:hover {
+    background: #f5f5f5 !important;
+  }
+  .atc-dropdown a.atc-item em {
+    font-style: normal;
+    color: #999;
+    font-size: 13px;
+  }
+  .atc-dropdown a.atc-item .atc-icon {
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .atc-dropdown a.atc-item .atc-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+  .atc-close {
+    position: absolute !important;
+    top: 6px !important;
+    right: 8px !important;
+    left: auto !important;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: none;
+    cursor: pointer;
+    color: #aaa;
+    font-size: 18px;
+    line-height: 1;
+    border-radius: 50%;
+    transition: background 0.15s, color 0.15s;
+    z-index: 10;
+  }
+  .atc-close:hover {
+    background: #eee;
+    color: #666;
+  }
+  .atc-anchor {
+    position: relative !important;
+  }
+</style>
+
+<script>
+(function() {
+  var LOG = '[ATC v2.5]';
+  var SELECTOR = '.addtocalendar';
+  var attached = {};
+
+  var DROPDOWN_HTML =
+    '<button class="atc-close" aria-label="Close">&times;</button>' +
+    '<a class="atc-item" href="https://events.example.com/add-to-calendar?service=ical" target="_blank" rel="noopener" role="menuitem">' +
+      '<span class="atc-icon"><svg viewBox="0 0 24 24" fill="none"><path d="M17.05 20.28c-.98.95-2.05-.16-2.67-.56-1.64-1.05-2.42-1.05-4.06 0-.62.4-1.69 1.51-2.67.56C4.58 17.36 3.3 11.07 6.8 8.47c1.4-1.03 2.83-.78 3.82-.36.73.31 1.36.31 2.09 0 1-.42 2.42-.67 3.82.36 1.14.84 1.95 2.3 1.76 4.58-.35 4.15-2.33 6.32-1.24 7.23z" fill="#555"/><path d="M15.84 4.08c-1.2 1.36-3.17 1.2-3.17 1.2s-.22-1.9 1-3.12C14.87.84 16.84 1 16.84 1s.18 1.76-1 3.08z" fill="#555"/></svg></span>' +
+      'Apple' +
+    '</a>' +
+    '<a class="atc-item" href="https://events.example.com/add-to-calendar?service=google" target="_blank" rel="noopener" role="menuitem">' +
+      '<span class="atc-icon"><svg viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09a6.9 6.9 0 010-4.17V7.08H2.18a11 11 0 000 9.84l3.66-2.83z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.08l3.66 2.83c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg></span>' +
+      'Google <em>(online)</em>' +
+    '</a>' +
+    '<a class="atc-item" href="https://events.example.com/add-to-calendar?service=outlook" target="_blank" rel="noopener" role="menuitem">' +
+      '<span class="atc-icon"><svg viewBox="0 0 24 24"><path d="M24 7.387v10.478c0 .23-.08.424-.238.576a.806.806 0 01-.588.233h-8.174v-12.5h8.174c.234 0 .432.078.588.233A.774.774 0 0124 7.387z" fill="#0364B8"/><path d="M24 7.387v-.6a.93.93 0 00-.33-.714.946.946 0 00-.742-.264H15v6.691l4.5 2.625L24 12.5V7.387z" fill="#0A2767"/><path d="M15 6.174h4.5V12.5H15z" fill="#28A8EA"/><path d="M19.5 6.174H24V12.5h-4.5z" fill="#0078D4"/><path d="M19.5 12.5H24v6.174h-4.5z" fill="#0364B8"/><path d="M15 12.5h4.5v6.174H15z" fill="#14447D"/><path d="M15 18.674h4.5v5.152H15z" fill="#0078D4"/><path d="M0 7.652v9.957c0 .364.12.663.36.897.24.234.533.351.877.351h7.626v-12.5H.914c-.273 0-.5.09-.668.264A.924.924 0 000 7.652z" fill="#0A2767" opacity=".5"/><path d="M9.75 5.674v13.75c0 .23-.065.433-.196.607a.95.95 0 01-.5.36l-.241.07a1.89 1.89 0 01-.313.039H.914c-.273 0-.5-.088-.668-.264A.924.924 0 010 19.21V7.652c0-.344.12-.637.36-.871.24-.234.533-.351.877-.351H8.863c.5 0 .887.414.887.914v-.67z" fill="#000" opacity=".1"/><path d="M8.863 5.674c.5 0 .887.372.887.83v12.122c0 .458-.387.83-.887.83H1.237c-.344 0-.637-.114-.877-.342A1.12 1.12 0 010 18.267V7.293c0-.344.12-.637.36-.871.24-.234.533-.351.877-.351h7.626z" fill="#000" opacity=".2"/><rect fill="#0078D4" rx=".887" height="11.152" width="9.75" y="5.674"/><path d="M4.875 8.86a3.16 3.16 0 012.236.843 2.94 2.94 0 01.889 2.234c0 .445-.088.86-.263 1.245a2.86 2.86 0 01-.73.977 3.378 3.378 0 01-2.22.776 3.21 3.21 0 01-2.257-.843 2.91 2.91 0 01-.905-2.198c0-.45.09-.869.269-1.257a2.88 2.88 0 01.74-.983A3.35 3.35 0 014.875 8.86zm-.044 1.21c-.548 0-.99.19-1.327.571-.337.38-.506.876-.506 1.487 0 .623.166 1.123.498 1.5.332.377.773.566 1.323.566.56 0 1.007-.186 1.34-.557.333-.37.5-.876.5-1.515 0-.62-.165-1.118-.494-1.494-.33-.372-.775-.558-1.334-.558z" fill="#fff"/></svg></span>' +
+      'Outlook' +
+    '</a>' +
+    '<a class="atc-item" href="https://events.example.com/add-to-calendar?service=outlook" target="_blank" rel="noopener" role="menuitem">' +
+      '<span class="atc-icon"><svg viewBox="0 0 24 24"><rect fill="#0078D4" rx="3" height="24" width="24"/><path d="M12 5l7.5 4.5V18a1 1 0 01-1 1h-13a1 1 0 01-1-1V9.5L12 5z" fill="#fff" opacity=".9"/><path d="M12 5l7.5 4.5L12 14 4.5 9.5 12 5z" fill="#fff"/></svg></span>' +
+      'Outlook.com <em>(online)</em>' +
+    '</a>' +
+    '<a class="atc-item" href="https://events.example.com/add-to-calendar?service=ical" target="_blank" rel="noopener" role="menuitem">' +
+      '<span class="atc-icon"><svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="#6001D2"/><path d="M12.29 14.33l3.97-7.33h2.49l-5.26 9.5v4.5h-2.35v-4.5L5.88 7h2.53l3.88 7.33z" fill="#fff"/></svg></span>' +
+      'Yahoo <em>(online)</em>' +
+    '</a>';
+
+  function closeAllDropdowns() {
+    var all = document.querySelectorAll('.atc-dropdown.atc-dropdown--open');
+    for (var i = 0; i < all.length; i++) {
+      all[i].classList.remove('atc-dropdown--open');
+    }
+  }
+
+  function attachToButton(triggerBtn) {
+    var btnId = triggerBtn.id || triggerBtn.parentElement.id;
+    if (attached[btnId]) return;
+    attached[btnId] = true;
+
+    // Find wrapper for positioning
+    var wrapper = triggerBtn.closest('.c-button') || triggerBtn.parentElement;
+    wrapper.classList.add('atc-anchor');
+
+    // Create a unique dropdown for this button
+    var dropdown = document.createElement('div');
+    dropdown.className = 'atc-dropdown';
+    dropdown.setAttribute('role', 'menu');
+    dropdown.innerHTML = DROPDOWN_HTML;
+    wrapper.appendChild(dropdown);
+
+    var closeBtnEl = dropdown.querySelector('.atc-close');
+
+    function openDropdown() {
+      closeAllDropdowns();
+      dropdown.classList.add('atc-dropdown--open');
+      var rect = triggerBtn.getBoundingClientRect();
+      if (rect.top < 300) {
+        dropdown.classList.add('atc-dropdown--below');
+      } else {
+        dropdown.classList.remove('atc-dropdown--below');
+      }
+    }
+
+    function closeDropdown() {
+      dropdown.classList.remove('atc-dropdown--open');
+    }
+
+    function handleClick(e) {
+      if (dropdown.contains(e.target)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      if (dropdown.classList.contains('atc-dropdown--open')) {
+        closeDropdown();
+      } else {
+        openDropdown();
+      }
+      return false;
+    }
+
+    wrapper.addEventListener('click', handleClick, true);
+    if (triggerBtn !== wrapper) {
+      triggerBtn.addEventListener('click', handleClick, true);
+    }
+
+    if (closeBtnEl) {
+      closeBtnEl.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeDropdown();
+      });
+    }
+
+    console.log(LOG, 'Attached to button:', btnId || wrapper.id);
+  }
+
+  function scanAndAttach() {
+    var buttons = document.querySelectorAll(SELECTOR);
+    console.log(LOG, 'Found', buttons.length, 'Addtocalendar elements');
+    for (var i = 0; i < buttons.length; i++) {
+      var el = buttons[i];
+      // If the class is on the <button> itself, use it directly
+      // If it's on a wrapper, find the button inside
+      var btn = (el.tagName === 'BUTTON') ? el : (el.querySelector('button') || el);
+      attachToButton(btn);
+    }
+  }
+
+  // Close dropdowns on outside click
+  document.addEventListener('click', function(e) {
+    var openDropdowns = document.querySelectorAll('.atc-dropdown.atc-dropdown--open');
+    for (var i = 0; i < openDropdowns.length; i++) {
+      var wrapper = openDropdowns[i].closest('.atc-anchor');
+      if (wrapper && !wrapper.contains(e.target)) {
+        openDropdowns[i].classList.remove('atc-dropdown--open');
+      }
+    }
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeAllDropdowns();
+  });
+
+  // Auto-open when #addtocalendar is in URL (opens the first one)
+  function checkHash() {
+    if (window.location.hash.toLowerCase() === '#addtocalendar') {
+      var first = document.querySelector('.atc-anchor .atc-dropdown');
+      if (first) first.classList.add('atc-dropdown--open');
+    }
+  }
+  window.addEventListener('hashchange', checkHash);
+
+  // Run scan multiple times to catch GHL late rendering
+  scanAndAttach();
+  document.addEventListener('DOMContentLoaded', function() { scanAndAttach(); checkHash(); });
+  [500, 1000, 2000, 3000, 5000].forEach(function(ms) {
+    setTimeout(function() { scanAndAttach(); }, ms);
+  });
+
+  // MutationObserver as safety net
+  if (typeof MutationObserver !== 'undefined') {
+    var observer = new MutationObserver(function() { scanAndAttach(); });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    setTimeout(function() { observer.disconnect(); }, 15000);
+  }
+})();
+</script>

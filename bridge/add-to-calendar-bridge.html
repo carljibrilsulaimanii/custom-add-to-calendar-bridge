@@ -1,0 +1,392 @@
+<!--
+  add-to-calendar-bridge.html
+  ---------------------------------------------------------------------------
+  Author:  Jibril Sulaiman
+  Date:    2026-04-27 (v1.5.0; published 2026-10-06)
+  Deploy:  GoHighLevel funnel page used only as the bridge, for example
+           https://events.example.com/add-to-calendar
+           Page builder > Settings > Tracking Code > Header Tracking. Paste the whole file.
+  What:    Reads the event's custom values, converts the Eastern start time to UTC
+           (EST and EDT handled), then sends the visitor to Google Calendar
+           (?service=google) or downloads an .ics file (?service=outlook | ical).
+  Why:     Replaces a paid AddEvent plan after its monthly event limit was hit. Every
+           page links to one bridge URL, and the event details live in custom values,
+           so a new class means updating four values, not every button.
+           Only custom-value names, identifiers and these comments differ from the
+           running copy.
+  ---------------------------------------------------------------------------
+-->
+
+<!-- Hidden container for description HTML — keeps it out of JS string literals -->
+<div id="atc-description" style="display:none;">{{custom_values.event_description}}</div>
+
+<script type="text/javascript">
+/*!
+ * Add to Calendar Bridge (Google + Outlook + iCal)
+ * Version: 1.5.0
+ * Author: Jibril Sulaiman (GHL Custom Implementation)
+ * Last Updated: 2026-04-27
+ *
+ * Updates:
+ * - FIX: Description moved to hidden <div> to prevent HTML breaking JS string literals
+ * - Improved description text normalization (handles <strong>, <br><br>, and stray HTML)
+ * - Uses {{custom_values.event_start_datetime}}
+ * - End time is calculated from a global class duration
+ * - Uses {{custom_values.event_location_url}} as the location
+ * - Handles EST / EDT automatically via America/New_York
+ *
+ * Expected GHL datetime format:
+ * MM-DD-YYYY hh:mm AM/PM
+ * Example: 03-18-2026 07:00 PM
+ */
+
+(function () {
+  const SCRIPT_NAME = 'AddToCal Bridge';
+  const VERSION = '1.5.0';
+  const GOOGLE_CTZ = 'America/New_York';
+  const EVENT_TIMEZONE = 'America/New_York';
+
+  const MAX_TRIES = 40;
+  const TRY_EVERY_MS = 250;
+  const BUTTON_SELECTOR = '.add-to-cal-js';
+
+  // Global class duration
+  const CLASS_DURATION_HOURS = 2.5;
+  const CLASS_DURATION_MS = CLASS_DURATION_HOURS * 60 * 60 * 1000;
+
+  // Description is read from a hidden <div> above to avoid HTML breaking JS strings
+  const CV = {
+    startDateTime: '{{custom_values.event_start_datetime}}',
+    title: '{{custom_values.event_title}}',
+    location: '{{custom_values.event_location_url}}'
+  };
+
+  function log(...args) {
+    try { console.log(`[${SCRIPT_NAME} v${VERSION}]`, ...args); } catch (_) {}
+  }
+
+  function looksUnrendered(v) {
+    const s = String(v || '');
+    return s.includes('{{') || s.includes('}}');
+  }
+
+  function normalizeDetailsText(raw) {
+    if (!raw) return '';
+    return String(raw)
+      // Consecutive <br> tags (with optional whitespace between) → double newline
+      .replace(/(<br\s*\/?>[\s]*){2,}/gi, '\n\n')
+      // Single <br> (including ones with class attributes) → single newline
+      .replace(/<br\s+class=["'][^"']*["']\s*>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      // Strip <strong>, <b>, <em>, <i>, <u>, <span> and their closing tags
+      .replace(/<\/?(strong|b|em|i|u|span)[^>]*>/gi, '')
+      // Strip any remaining HTML tags as a safety net
+      .replace(/<[^>]+>/g, '')
+      // Decode common HTML entities
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&nbsp;/gi, ' ')
+      // Collapse 3+ consecutive newlines down to 2 (one blank line max)
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function escapeIcsText(str) {
+    return String(str || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\n/g, '\\n')
+      .replace(/,/g, '\\,')
+      .replace(/;/g, '\\;');
+  }
+
+  function pad(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  function dateToUtcStamp(date) {
+    return (
+      date.getUTCFullYear() +
+      pad(date.getUTCMonth() + 1) +
+      pad(date.getUTCDate()) +
+      'T' +
+      pad(date.getUTCHours()) +
+      pad(date.getUTCMinutes()) +
+      pad(date.getUTCSeconds()) +
+      'Z'
+    );
+  }
+
+  function getOffsetMinutesForTimeZone(date, timeZone) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      timeZoneName: 'shortOffset',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23'
+    });
+
+    const parts = formatter.formatToParts(date);
+    const tzPart = parts.find(p => p.type === 'timeZoneName');
+    if (!tzPart) return null;
+
+    const m = tzPart.value.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/i);
+    if (!m) return null;
+
+    const sign = m[1] === '-' ? -1 : 1;
+    const hours = parseInt(m[2], 10);
+    const minutes = parseInt(m[3] || '0', 10);
+
+    return sign * (hours * 60 + minutes);
+  }
+
+  function parseGhlDateTime(str) {
+    const s = String(str || '').trim();
+    const m = s.match(/^(\d{2})-(\d{2})-(\d{4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (!m) return null;
+
+    const month = Number(m[1]);
+    const day = Number(m[2]);
+    const year = Number(m[3]);
+    let hour = Number(m[4]);
+    const minute = Number(m[5]);
+    const ampm = m[6].toUpperCase();
+
+    if (hour === 12 && ampm === 'AM') hour = 0;
+    if (hour !== 12 && ampm === 'PM') hour += 12;
+
+    return { year, month, day, hour, minute, second: 0 };
+  }
+
+  function zonedPartsToUtcDate(parts, timeZone) {
+    if (!parts) return null;
+
+    const { year, month, day, hour, minute, second } = parts;
+
+    const guess = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    const offsetMinutes = getOffsetMinutesForTimeZone(guess, timeZone);
+    if (offsetMinutes === null) return null;
+
+    const utcMs = Date.UTC(year, month - 1, day, hour, minute, second) - (offsetMinutes * 60 * 1000);
+    return new Date(utcMs);
+  }
+
+  function getDescriptionFromDom() {
+    var el = document.getElementById('atc-description');
+    if (!el) return '';
+    return el.innerHTML || '';
+  }
+
+  function buildCore() {
+    const title = (CV.title || '').trim();
+    const details = normalizeDetailsText(getDescriptionFromDom());
+    const location = (CV.location || '').trim();
+    const startDateTimeRaw = (CV.startDateTime || '').trim();
+
+    if (!title || looksUnrendered(title)) {
+      return { ok: false, reason: 'Title did not render.' };
+    }
+
+    if (!startDateTimeRaw || looksUnrendered(startDateTimeRaw)) {
+      return { ok: false, reason: 'Start datetime did not render.' };
+    }
+
+    if (!location || looksUnrendered(location)) {
+      return { ok: false, reason: 'Location did not render.' };
+    }
+
+    const localParts = parseGhlDateTime(startDateTimeRaw);
+    if (!localParts) {
+      return { ok: false, reason: 'Start datetime format invalid. Expected MM-DD-YYYY hh:mm AM/PM.' };
+    }
+
+    const startDateUtc = zonedPartsToUtcDate(localParts, EVENT_TIMEZONE);
+    if (!startDateUtc || isNaN(startDateUtc.getTime())) {
+      return { ok: false, reason: 'Failed converting start datetime to UTC.' };
+    }
+
+    const endDateUtc = new Date(startDateUtc.getTime() + CLASS_DURATION_MS);
+
+    log('Computed event times', {
+      input: startDateTimeRaw,
+      durationHours: CLASS_DURATION_HOURS,
+      startUtc: dateToUtcStamp(startDateUtc),
+      endUtc: dateToUtcStamp(endDateUtc),
+      location
+    });
+
+    return {
+      ok: true,
+      startUtc: dateToUtcStamp(startDateUtc),
+      endUtc: dateToUtcStamp(endDateUtc),
+      title,
+      details,
+      location
+    };
+  }
+
+  function buildGoogleUrl(core) {
+    const dates = core.startUtc + '/' + core.endUtc;
+    return (
+      'https://calendar.google.com/calendar/u/0/r/eventedit' +
+      '?dates=' + encodeURIComponent(dates) +
+      '&text=' + encodeURIComponent(core.title) +
+      '&details=' + encodeURIComponent(core.details) +
+      '&location=' + encodeURIComponent(core.location) +
+      '&sf=true&trp=false' +
+      '&ctz=' + encodeURIComponent(GOOGLE_CTZ)
+    );
+  }
+
+  function buildIcs(core) {
+    const uid = 'atc-' + Date.now() + '@example.com';
+    const dtstamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Example//AddToCalendar//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      'UID:' + uid,
+      'DTSTAMP:' + dtstamp,
+      'DTSTART:' + core.startUtc,
+      'DTEND:' + core.endUtc,
+      'SUMMARY:' + escapeIcsText(core.title),
+      'DESCRIPTION:' + escapeIcsText(core.details),
+      'LOCATION:' + escapeIcsText(core.location),
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ];
+    return lines.join('\r\n');
+  }
+
+  function downloadTextFile(filename, text, mime) {
+    const blob = new Blob([text], { type: mime || 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function getService() {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get('service') || '').toLowerCase().trim();
+  }
+
+  function alreadyRan() {
+    return window.__ADD_TO_CAL_RAN__ === true;
+  }
+
+  function markRan() {
+    window.__ADD_TO_CAL_RAN__ = true;
+  }
+
+  function route(service) {
+    const core = buildCore();
+    if (!core.ok) return { ok: false, reason: core.reason };
+
+    if (service === 'google') {
+      window.location.assign(buildGoogleUrl(core));
+      return { ok: true };
+    }
+
+    if (service === 'outlook') {
+      downloadTextFile('Event-Outlook.ics', buildIcs(core), 'text/calendar;charset=utf-8');
+      return { ok: true };
+    }
+
+    if (service === 'ical') {
+      downloadTextFile('Event-iCal.ics', buildIcs(core), 'text/calendar;charset=utf-8');
+      return { ok: true };
+    }
+
+    return { ok: false, reason: 'Unknown service. Use ?service=google|outlook|ical' };
+  }
+
+  function ensureFallbackUi(msg) {
+    let el = document.getElementById('addtocal-fallback');
+    if (el) return;
+
+    el = document.createElement('div');
+    el.id = 'addtocal-fallback';
+    el.style.cssText = 'max-width:760px;margin:24px auto;padding:16px;border:1px solid #ddd;border-radius:12px;font-family:Arial,sans-serif;';
+    el.innerHTML =
+      '<div style="font-weight:700;margin-bottom:8px;">Add to Calendar</div>' +
+      '<div style="margin-bottom:12px;">' + (msg || 'If you were not redirected automatically, click below:') + '</div>' +
+      '<button id="addtocal-continue" style="padding:10px 14px;border-radius:10px;border:0;cursor:pointer;">Continue</button>';
+    document.body.prepend(el);
+
+    const btn = document.getElementById('addtocal-continue');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        const service = getService() || 'google';
+        route(service);
+      });
+    }
+  }
+
+  function bindManualButton() {
+    const btn = document.querySelector(BUTTON_SELECTOR);
+    if (!btn || btn.dataset.atcBound === 'true') return;
+    btn.dataset.atcBound = 'true';
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      route(getService() || 'google');
+    });
+  }
+
+  function autoRun() {
+    const service = getService();
+    if (!service) return;
+
+    if (alreadyRan()) return;
+    markRan();
+
+    let tries = 0;
+    const iv = setInterval(function () {
+      tries++;
+
+      const result = route(service);
+      if (result.ok) {
+        clearInterval(iv);
+        return;
+      }
+
+      if (tries >= MAX_TRIES) {
+        clearInterval(iv);
+        log('Auto-run failed:', result.reason);
+        ensureFallbackUi('Auto redirect was blocked or values were not ready. Click Continue to proceed.');
+      }
+    }, TRY_EVERY_MS);
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    autoRun();
+    bindManualButton();
+  });
+
+  window.addEventListener('pageshow', function () {
+    autoRun();
+  });
+
+  setTimeout(function () {
+    autoRun();
+    bindManualButton();
+  }, 600);
+})();
+</script>
