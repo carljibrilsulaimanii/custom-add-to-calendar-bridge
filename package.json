@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Self-hosted Add to Calendar bridge page and AddEvent-style dropdown for GoHighLevel funnels, driven by custom values.",
+  "description": "Self-hosted Add to Calendar bridge page and AddEvent-style dropdown, for GoHighLevel funnels (custom values) and HubSpot pages (a configuration record).",
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test tests/ hubspot/tests/"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

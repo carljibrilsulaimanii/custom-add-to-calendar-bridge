@@ -1,0 +1,35 @@
+[ {
+  "id" : "9c509993-b01e-03ac-6d03-e5a4e475449b",
+  "name" : "crmobject_field",
+  "label" : "CRM object",
+  "required" : false,
+  "locked" : false,
+  "object_type" : "p_free_class_configurations",
+  "properties_to_fetch" : [ "hs_object_id", "event_start_date_and_time", "class_title" ],
+  "display_properties" : [ "class_type", "class_title" ],
+  "type" : "crmobject",
+  "display_width" : null,
+  "default" : {
+    "id" : null
+  }
+}, {
+  "id" : "4f2b8c1e-7a3d-4e9b-b6c5-2d1f0a9e8b71",
+  "name" : "link_text",
+  "label" : "Button text",
+  "required" : false,
+  "locked" : false,
+  "allow_new_line" : false,
+  "type" : "text",
+  "display_width" : null,
+  "default" : "Add To Calendar"
+}, {
+  "id" : "8d3e5a7c-1b2f-4c6d-9e0a-3f5b7c9d1e24",
+  "name" : "bridge_url",
+  "label" : "Bridge page URL (leave as is)",
+  "required" : false,
+  "locked" : false,
+  "allow_new_line" : false,
+  "type" : "text",
+  "display_width" : null,
+  "default" : "https://www.example.com/add-to-calendar"
+} ]
